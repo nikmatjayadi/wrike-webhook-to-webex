@@ -74,11 +74,11 @@ app.post('/wrike-webhook', async (req, res) => {
     // Determine item type
     let itemType = 'Task';
     if (Array.isArray(task.metadata)) {
-    const itemTypeMeta = task.metadata.find(meta => meta.key === 'Item type');
-    if (itemTypeMeta?.value) {
-    itemType = itemTypeMeta.value;
+        const itemTypeMeta = task.metadata.find(meta => meta.key === 'Item type');
+        if (itemTypeMeta?.value) {
+            itemType = itemTypeMeta.value;
+        }
     }
-    };
 
     // Parse custom field: Priority
     let priority = '(None)';

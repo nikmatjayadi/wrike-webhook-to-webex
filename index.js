@@ -6,13 +6,11 @@ const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const WRIKE_TOKEN = process.env.WRIKE_TOKEN;
 const MAPPING_ENV = process.env.FOLDER_TO_ROOM_MAP || '';
-
-// Custom field label to display (can be "Technology" or field ID)
-const TECHNOLOGY_FIELD_NAME = 'Technology'; // Update to field ID if needed
+const TECHNOLOGY_FIELD_NAME = 'Technology'; // Change if you use a different field name or field ID
 
 app.use(express.json());
 
-// Parse mapping from env: "123:FOLDER1,456:FOLDER2"
+// Parse FOLDER_TO_ROOM_MAP env: "123:FOLDER1,456:FOLDER2"
 const folderToRoomMap = MAPPING_ENV.split(',')
   .map(pair => pair.trim().split(':'))
   .filter(pair => pair.length === 2)
@@ -46,7 +44,7 @@ app.post('/wrike-webhook', async (req, res) => {
   }
 
   try {
-    // Fetch full task details
+    // Fetch task details
     const taskRes = await axios.get(`https://www.wrike.com/api/v4/tasks/${taskId}`, {
       headers: { Authorization: `Bearer ${WRIKE_TOKEN}` }
     });
@@ -54,7 +52,7 @@ app.post('/wrike-webhook', async (req, res) => {
     const task = taskRes.data.data[0];
     const folderIds = task.parentIds || [];
 
-    // Match folder ID to Webex room
+    // Match to Webex room
     let roomId = null;
     for (const folderId of folderIds) {
       if (folderToRoomMap[folderId]) {
@@ -64,11 +62,11 @@ app.post('/wrike-webhook', async (req, res) => {
     }
 
     if (!roomId) {
-      console.warn(`⚠️ No Webex room for folders: ${folderIds.join(', ')}`);
-      return res.sendStatus(204); // Skip if no match
+      console.warn(`⚠️ No Webex room mapped for folders: ${folderIds.join(', ')}`);
+      return res.sendStatus(204);
     }
 
-    // Format priority
+    // Priority formatting
     const priorityMap = {
       'Low': '🟢 Low',
       'Normal': '🟡 Normal',
@@ -77,12 +75,12 @@ app.post('/wrike-webhook', async (req, res) => {
     };
     const priority = priorityMap[task.importance] || '❔ Unknown';
 
-    // Get assignees
+    // Assignee names
     const assignees = (task.responsibleIds || []).length
       ? await getUserNames(task.responsibleIds)
       : ['(Unassigned)'];
 
-    // Get Technology from custom fields
+    // Technology from customFields
     let technology = '(None)';
     if (Array.isArray(task.customFields)) {
       const techField = task.customFields.find(
@@ -93,7 +91,7 @@ app.post('/wrike-webhook', async (req, res) => {
       }
     }
 
-    const message = `🎫 **Wrike ${eventType}**  
+    const message = `🎫 **Wrike ${eventType}**
 
 - 🆔 **Type**: Task  
 - 📝 **Name**: ${task.title || 'Untitled'}  
@@ -115,7 +113,7 @@ app.post('/wrike-webhook', async (req, res) => {
       }
     );
 
-    console.log(`✅ Sent task to Webex room ${roomId}`);
+    console.log(`✅ Sent task update to Webex room ${roomId} for task ${task.id}`);
     res.sendStatus(200);
   } catch (err) {
     console.error('❌ Error handling event:', err.response?.data || err.message);
@@ -123,14 +121,19 @@ app.post('/wrike-webhook', async (req, res) => {
   }
 });
 
-// Helper to fetch user names
+// ✅ Fetch assignee names from Wrike
 async function getUserNames(userIds) {
+  if (!userIds.length) return ['(Unassigned)'];
+
   try {
-    const res = await axios.get(`https://www.wrike.com/api/v4/contacts`, {
-      headers: { Authorization: `Bearer ${WRIKE_TOKEN}` },
-      params: { id: userIds.join(',') }
+    const url = `https://www.wrike.com/api/v4/contacts/${userIds.join(',')}`;
+    const res = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${WRIKE_TOKEN}`
+      }
     });
-    return res.data.data.map(user => user.firstName + ' ' + user.lastName);
+
+    return res.data.data.map(user => `${user.firstName} ${user.lastName}`);
   } catch (err) {
     console.warn('⚠️ Failed to fetch user names:', err.response?.data || err.message);
     return ['(Lookup failed)'];

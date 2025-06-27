@@ -7,7 +7,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const WRIKE_TOKEN = process.env.WRIKE_TOKEN;
 const MAPPING_ENV = process.env.FOLDER_TO_ROOM_MAP || '';
 
-const PRIORITY_FIELD_ID = 'IEAEOPF5JUAIUYB7';
+const PRIORITY_FIELD_ID = 'IEAEOPF5JUAIUOUD';
 const TECHNOLOGY_FIELD_ID = 'IEAEOPF5JUAIUORM';
 
 app.use(express.json());

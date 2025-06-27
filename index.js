@@ -6,11 +6,13 @@ const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const WRIKE_TOKEN = process.env.WRIKE_TOKEN;
 const MAPPING_ENV = process.env.FOLDER_TO_ROOM_MAP || '';
-const TECHNOLOGY_FIELD_NAME = 'Technology'; // Change if you use a different field name or field ID
+
+const PRIORITY_FIELD_NAME = 'Priority';
+const TECHNOLOGY_FIELD_NAME = 'Technology';
 
 app.use(express.json());
 
-// Parse FOLDER_TO_ROOM_MAP env: "123:FOLDER1,456:FOLDER2"
+// Parse FOLDER_TO_ROOM_MAP from env
 const folderToRoomMap = MAPPING_ENV.split(',')
   .map(pair => pair.trim().split(':'))
   .filter(pair => pair.length === 2)
@@ -24,7 +26,7 @@ console.log('✅ Folder → Room mapping:', folderToRoomMap);
 app.post('/wrike-webhook', async (req, res) => {
   const token = req.headers['x-request-token'];
   if (token) {
-    console.log('✅ Wrike verification request received:', token);
+    console.log('✅ Wrike verification token received:', token);
     return res.status(200).send(token);
   }
 
@@ -39,12 +41,12 @@ app.post('/wrike-webhook', async (req, res) => {
   const eventType = event.eventType;
 
   if (!taskId) {
-    console.error('❌ No taskId found in event:', event);
+    console.error('❌ Missing taskId in event:', event);
     return res.sendStatus(400);
   }
 
   try {
-    // Fetch task details
+    // Fetch full task info
     const taskRes = await axios.get(`https://www.wrike.com/api/v4/tasks/${taskId}`, {
       headers: { Authorization: `Bearer ${WRIKE_TOKEN}` }
     });
@@ -52,7 +54,7 @@ app.post('/wrike-webhook', async (req, res) => {
     const task = taskRes.data.data[0];
     const folderIds = task.parentIds || [];
 
-    // Match to Webex room
+    // Find mapped Webex room
     let roomId = null;
     for (const folderId of folderIds) {
       if (folderToRoomMap[folderId]) {
@@ -66,21 +68,23 @@ app.post('/wrike-webhook', async (req, res) => {
       return res.sendStatus(204);
     }
 
-    // Priority formatting
+    // 🟡 Custom field: Priority
+    let priority = '(None)';
     const priorityMap = {
-      'Low': '🟢 Low',
-      'Normal': '🟡 Normal',
-      'High': '🔴 High',
-      'Urgent': '🚨 Urgent'
+      High: '🔴 High',
+      Medium: '🟡 Medium',
+      Low: '🟢 Low'
     };
-    const priority = priorityMap[task.importance] || '❔ Unknown';
+    if (Array.isArray(task.customFields)) {
+      const priorityField = task.customFields.find(
+        field => field.name === PRIORITY_FIELD_NAME || field.id === PRIORITY_FIELD_NAME
+      );
+      if (priorityField?.value) {
+        priority = priorityMap[priorityField.value] || priorityField.value;
+      }
+    }
 
-    // Assignee names
-    const assignees = (task.responsibleIds || []).length
-      ? await getUserNames(task.responsibleIds)
-      : ['(Unassigned)'];
-
-    // Technology from customFields
+    // 🔬 Custom field: Technology
     let technology = '(None)';
     if (Array.isArray(task.customFields)) {
       const techField = task.customFields.find(
@@ -91,6 +95,12 @@ app.post('/wrike-webhook', async (req, res) => {
       }
     }
 
+    // 👥 Assignees
+    const assignees = (task.responsibleIds || []).length
+      ? await getUserNames(task.responsibleIds)
+      : ['(Unassigned)'];
+
+    // 📨 Format message
     const message = `🎫 **Wrike ${eventType}**
 
 - 🆔 **Type**: Task  
@@ -100,6 +110,7 @@ app.post('/wrike-webhook', async (req, res) => {
 - 🧪 **Technology**: ${technology}  
 - 🔗 [Open in Wrike](https://www.wrike.com/open.htm?id=${task.id})`;
 
+    // 📤 Send to Webex
     await axios.post(
       'https://webexapis.com/v1/messages',
       {
@@ -107,30 +118,26 @@ app.post('/wrike-webhook', async (req, res) => {
         markdown: message
       },
       {
-        headers: {
-          Authorization: `Bearer ${BOT_TOKEN}`
-        }
+        headers: { Authorization: `Bearer ${BOT_TOKEN}` }
       }
     );
 
-    console.log(`✅ Sent task update to Webex room ${roomId} for task ${task.id}`);
+    console.log(`✅ Message sent to room ${roomId} for task "${task.title}"`);
     res.sendStatus(200);
   } catch (err) {
-    console.error('❌ Error handling event:', err.response?.data || err.message);
+    console.error('❌ Error handling task:', err.response?.data || err.message);
     res.sendStatus(500);
   }
 });
 
-// ✅ Fetch assignee names from Wrike
+// 🧠 Helper to get Wrike user names
 async function getUserNames(userIds) {
   if (!userIds.length) return ['(Unassigned)'];
 
   try {
     const url = `https://www.wrike.com/api/v4/contacts/${userIds.join(',')}`;
     const res = await axios.get(url, {
-      headers: {
-        Authorization: `Bearer ${WRIKE_TOKEN}`
-      }
+      headers: { Authorization: `Bearer ${WRIKE_TOKEN}` }
     });
 
     return res.data.data.map(user => `${user.firstName} ${user.lastName}`);

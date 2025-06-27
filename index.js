@@ -7,12 +7,12 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const WRIKE_TOKEN = process.env.WRIKE_TOKEN;
 const MAPPING_ENV = process.env.FOLDER_TO_ROOM_MAP || '';
 
-const PRIORITY_FIELD_NAME = 'Priority';
-const TECHNOLOGY_FIELD_NAME = 'Technology';
+const PRIORITY_FIELD_ID = 'IEAEOPF5JUAIUYB7';
+const TECHNOLOGY_FIELD_ID = 'IEAEOPF5JUAIUORM';
 
 app.use(express.json());
 
-// Parse FOLDER_TO_ROOM_MAP from env
+// Map folders to Webex room IDs from env
 const folderToRoomMap = MAPPING_ENV.split(',')
   .map(pair => pair.trim().split(':'))
   .filter(pair => pair.length === 2)
@@ -37,8 +37,7 @@ app.post('/wrike-webhook', async (req, res) => {
   }
 
   const event = events[0];
-  const taskId = event.taskId;
-  const eventType = event.eventType;
+  const { taskId, eventType } = event;
 
   if (!taskId) {
     console.error('❌ Missing taskId in event:', event);
@@ -46,7 +45,7 @@ app.post('/wrike-webhook', async (req, res) => {
   }
 
   try {
-    // Fetch full task info
+    // Fetch full task details
     const taskRes = await axios.get(`https://www.wrike.com/api/v4/tasks/${taskId}`, {
       headers: { Authorization: `Bearer ${WRIKE_TOKEN}` }
     });
@@ -54,7 +53,7 @@ app.post('/wrike-webhook', async (req, res) => {
     const task = taskRes.data.data[0];
     const folderIds = task.parentIds || [];
 
-    // Find mapped Webex room
+    // Determine destination room
     let roomId = null;
     for (const folderId of folderIds) {
       if (folderToRoomMap[folderId]) {
@@ -68,39 +67,34 @@ app.post('/wrike-webhook', async (req, res) => {
       return res.sendStatus(204);
     }
 
-    // 🟡 Custom field: Priority
+    // Log customFields for debugging
+    console.log('🔍 Custom Fields:', task.customFields);
+
+    // Parse custom field: Priority
     let priority = '(None)';
     const priorityMap = {
       High: '🔴 High',
       Medium: '🟡 Medium',
       Low: '🟢 Low'
     };
-    if (Array.isArray(task.customFields)) {
-      const priorityField = task.customFields.find(
-        field => field.name === PRIORITY_FIELD_NAME || field.id === PRIORITY_FIELD_NAME
-      );
-      if (priorityField?.value) {
-        priority = priorityMap[priorityField.value] || priorityField.value;
-      }
+    const priorityField = (task.customFields || []).find(f => f.id === PRIORITY_FIELD_ID);
+    if (priorityField?.value) {
+      priority = priorityMap[priorityField.value] || priorityField.value;
     }
 
-    // 🔬 Custom field: Technology
+    // Parse custom field: Technology
     let technology = '(None)';
-    if (Array.isArray(task.customFields)) {
-      const techField = task.customFields.find(
-        field => field.name === TECHNOLOGY_FIELD_NAME || field.id === TECHNOLOGY_FIELD_NAME
-      );
-      if (techField?.value) {
-        technology = techField.value;
-      }
+    const techField = (task.customFields || []).find(f => f.id === TECHNOLOGY_FIELD_ID);
+    if (techField?.value) {
+      technology = techField.value;
     }
 
-    // 👥 Assignees
+    // Assignees
     const assignees = (task.responsibleIds || []).length
       ? await getUserNames(task.responsibleIds)
       : ['(Unassigned)'];
 
-    // 📨 Format message
+    // Construct message
     const message = `🎫 **Wrike ${eventType}**
 
 - 🆔 **Type**: Task  
@@ -110,7 +104,7 @@ app.post('/wrike-webhook', async (req, res) => {
 - 🧪 **Technology**: ${technology}  
 - 🔗 [Open in Wrike](https://www.wrike.com/open.htm?id=${task.id})`;
 
-    // 📤 Send to Webex
+    // Send to Webex
     await axios.post(
       'https://webexapis.com/v1/messages',
       {
@@ -130,16 +124,14 @@ app.post('/wrike-webhook', async (req, res) => {
   }
 });
 
-// 🧠 Helper to get Wrike user names
+// Get Wrike user names
 async function getUserNames(userIds) {
   if (!userIds.length) return ['(Unassigned)'];
-
   try {
     const url = `https://www.wrike.com/api/v4/contacts/${userIds.join(',')}`;
     const res = await axios.get(url, {
       headers: { Authorization: `Bearer ${WRIKE_TOKEN}` }
     });
-
     return res.data.data.map(user => `${user.firstName} ${user.lastName}`);
   } catch (err) {
     console.warn('⚠️ Failed to fetch user names:', err.response?.data || err.message);

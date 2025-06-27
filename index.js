@@ -52,6 +52,7 @@ app.post('/wrike-webhook', async (req, res) => {
 
     const task = taskRes.data.data[0];
     const folderIds = task.parentIds || [];
+    const status = task.status || '(Unknown)';
 
     // Determine destination room
     let roomId = null;
@@ -69,6 +70,15 @@ app.post('/wrike-webhook', async (req, res) => {
 
     // Log customFields for debugging
     console.log('🔍 Custom Fields:', task.customFields);
+
+    // Determine item type
+    let itemType = 'Task';
+    if (Array.isArray(task.metadata)) {
+    const itemTypeMeta = task.metadata.find(meta => meta.key === 'Item type');
+    if (itemTypeMeta?.value) {
+    itemType = itemTypeMeta.value;
+    }
+    };
 
     // Parse custom field: Priority
     let priority = '(None)';
@@ -97,8 +107,9 @@ app.post('/wrike-webhook', async (req, res) => {
     // Construct message
     const message = `🎫 **Wrike ${eventType}**
 
-- 🆔 **Type**: Task  
-- 📝 **Name**: ${task.title || 'Untitled'}  
+- 🆔 **Type**: ${itemType} 
+- 📝 **Name**: ${task.title || 'Untitled'}
+- 🔄 **Status**: ${status}  
 - 🔺 **Priority**: ${priority}  
 - 👤 **Assignees**: ${assignees.join(', ')}  
 - 🧪 **Technology**: ${technology}  
